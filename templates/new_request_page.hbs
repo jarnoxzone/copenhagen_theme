@@ -52,4 +52,188 @@
   };
 
   renderNewRequestForm(settings, props, container);
+
+  (function () {
+    const FORM_ID = "44251008837649";
+
+    const RECOVERY_TYPE_FIELD_ID = "44251014526993"; // Taastamise tüüp (multiselect)
+    const RECOVERY_METHOD_FIELD_ID = "44251052361745"; // Taastamise viis
+    const VSERVER_FIELD_ID = "44251136403345"; // Virtuaalserveri nimi
+
+    const TYPE_VALUES_THAT_ENABLE_METHOD = new Set(["ttt_failid", "ttt_andmebaas"]);
+
+    const CUSTOM_HTML_ID = "custom-recovery-note";
+
+    function closestFieldWrapper(el) {
+      return (
+        el.closest('[data-garden-id$=".field"]') ||
+        el.closest('[data-field-type]') ||
+        el.closest('[data-field-id]') ||
+        el.closest(".form-field") ||
+        el.closest("div") ||
+        el
+      );
+    }
+
+    function isOnForm(root, formId) {
+      const el =
+        root.querySelector('input[name="request[ticket_form_id]"]') ||
+        root.querySelector('input[name="ticket_form_id"]') ||
+        root.querySelector('select[name="ticket_form_id"]');
+
+      return !!el && el.value === formId;
+    }
+
+    function setFieldVisible(fieldInputEl, visible) {
+      if (!fieldInputEl) return;
+
+      const wrapper = closestFieldWrapper(fieldInputEl);
+      wrapper.style.display = visible ? "" : "none";
+
+      if (fieldInputEl.dataset.origRequired == null) {
+        fieldInputEl.dataset.origRequired = fieldInputEl.required ? "1" : "0";
+      }
+      const wasRequired = fieldInputEl.dataset.origRequired === "1";
+      fieldInputEl.required = visible && wasRequired;
+    }
+
+    function buildSubject(root) {
+      const vsInput = root.querySelector(
+        'input[name="request[custom_fields][' + VSERVER_FIELD_ID + ']"]'
+      );
+
+      const vsName = vsInput ? (vsInput.value || "").trim() : "";
+      return vsName ? "[TAASTAMISE PÄRING] " + vsName : "[TAASTAMISE PÄRING]";
+    }
+
+    function hideSubjectAndDescription(root) {
+      const subjectInput = root.querySelector('input[name="request[subject]"]');
+      if (subjectInput) {
+        closestFieldWrapper(subjectInput).style.display = "none";
+        subjectInput.value = buildSubject(root);
+      }
+
+      const descTextarea = root.querySelector(
+        'textarea[name="request[description]"]'
+      );
+      if (descTextarea) {
+        closestFieldWrapper(descTextarea).style.display = "none";
+        if (!descTextarea.value) descTextarea.value = "(auto)";
+      }
+    }
+
+    function getSelectedRecoveryTypeValues(root) {
+      const nodes = root.querySelectorAll(
+        'input[name="request[custom_fields][' + RECOVERY_TYPE_FIELD_ID + '][]"]'
+      );
+      const allNodes = Array.from(nodes);
+
+      // Zendesk can render multiselect values as checked controls or as hidden inputs.
+      const checkedValues = allNodes
+        .filter((n) => n.checked)
+        .map((n) => (n.value || "").trim())
+        .filter(Boolean);
+
+      if (checkedValues.length > 0) return checkedValues;
+
+      return allNodes
+        .map((n) => (n.value || "").trim())
+        .filter(Boolean);
+    }
+
+    function applyConditionalVisibility(root) {
+      const selectedValues = getSelectedRecoveryTypeValues(root);
+      const shouldShow = selectedValues.some((v) =>
+        TYPE_VALUES_THAT_ENABLE_METHOD.has(v)
+      );
+
+      const methodInput = root.querySelector(
+        'input[name="request[custom_fields][' + RECOVERY_METHOD_FIELD_ID + ']"]'
+      );
+
+      if (!methodInput) return;
+
+      setFieldVisible(methodInput, shouldShow);
+
+      if (!shouldShow) {
+        methodInput.value = "";
+      }
+    }
+
+    function hideAttachments(root) {
+      const upload = root.querySelector('[data-garden-id="forms.file_upload"]');
+      if (!upload) return;
+
+      const wrapper =
+        upload.closest('div[data-garden-id="forms.field"]') ||
+        upload.closest("div");
+
+      if (wrapper) {
+        wrapper.style.display = "none";
+      }
+    }
+
+    function insertCustomHtml(root) {
+      if (root.querySelector("#" + CUSTOM_HTML_ID)) return;
+
+      const formEl =
+        root.querySelector("form") ||
+        root.querySelector('[data-garden-id="forms.form"]') ||
+        root.firstElementChild;
+
+      if (!formEl) return;
+
+      const customBlock = document.createElement("div");
+      customBlock.id = CUSTOM_HTML_ID;
+      customBlock.innerHTML = `
+              <h2 style="margin-top:20px;margin-bottom:10px;font-size:18px;">Abi</h2>
+        <ul style="margin-top:20px;padding:16px 16px 16px 36px;border:1px solid #ddd;border-radius:4px;background:#f8f8f8;line-height:1.6;list-style-type:disc;list-style-position:outside;">
+          <li style="margin-bottom:8px;">
+            <a href="https://www.zone.ee/help/kb/varundus-ja-varukoopiad/" target="_blank" rel="noopener">
+              Lisainfo varunduse ja varukoopiate kohta - Zone Help
+            </a>
+          </li>
+          <li>
+            Kas veebilehest on olemas tõmmis?
+            <a href="https://www.zone.ee/help/kb/zone-veebirakenduste-haldur/#h2tommised-ja-taastamineh2" target="_blank" rel="noopener">
+              Proovi taastada veebilehte tõmmisest.
+            </a>
+          </li>
+        </ul>
+      `;
+
+      formEl.appendChild(customBlock);
+    }
+
+    function run() {
+      const root = document.getElementById("new-request-form");
+      if (!root) return;
+
+      if (!isOnForm(root, FORM_ID)) {
+        const existing = root.querySelector("#" + CUSTOM_HTML_ID);
+        if (existing) existing.remove();
+        return;
+      }
+
+      hideSubjectAndDescription(root);
+      applyConditionalVisibility(root);
+      hideAttachments(root);
+      insertCustomHtml(root);
+    }
+
+    function init() {
+      const root = document.getElementById("new-request-form");
+      if (!root) return;
+
+      const obs = new MutationObserver(run);
+      obs.observe(root, { childList: true, subtree: true });
+
+      root.addEventListener("change", run, true);
+      root.addEventListener("input", run, true);
+
+      run();
+    }
+
+    init();
+  })();
 </script>
